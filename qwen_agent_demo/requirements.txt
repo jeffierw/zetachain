@@ -1,0 +1,12 @@
+# Qwen-Agent 框架
+qwen-agent>=0.0.6
+
+# Qwen-Agent 依赖项
+python-dateutil>=2.8.0
+
+# API 调用支持
+openai>=1.0.0
+
+# 环境变量管理
+python-dotenv>=1.0.0
+
