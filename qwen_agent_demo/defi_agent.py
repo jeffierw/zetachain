@@ -1,14 +1,13 @@
 """
-集成自定义工具的交互式 Agent
-你可以不断提问，Agent 会自动调用工具回答问题
+DeFi Swap 意图解析 Agent
+专门用于从自然语言中解析 DeFi Swap 操作参数，返回结构化 JSON
 """
+import json
 import os
 from dotenv import load_dotenv
 from qwen_agent.agents import Assistant
 from qwen_agent.llm import get_chat_model
 
-# 导入自定义工具（导入后会自动注册）
-from custom_tools import ToUppercaseTool, CalculateSumTool, StringInfoTool
 from defi_intent_parser.tool import ParseSwapIntentTool
 
 # 加载环境变量
@@ -43,12 +42,12 @@ def chat_with_agent(agent):
     # 对话历史（用于多轮对话）
     messages = []
     
-    print_section("开始对话")
+    print_section("DeFi Swap 意图解析 Agent")
     print("\n💡 提示：")
-    print("  - 你可以让 Agent 将字符串转大写")
-    print("  - 你可以让 Agent 计算两个数的和")
-    print("  - 你可以让 Agent 分析字符串信息")
-    print("  - 也可以直接聊天，Agent 会自动判断是否需要调用工具")
+    print("  - 输入 DeFi Swap 相关的自然语言，例如：")
+    print("    • 帮我在 Base 上用 10 USDC 换成 ETH")
+    print("    • 把我 50 U 兑换成 Polygon 上的 MATIC")
+    print("  - Agent 会自动解析并返回 JSON 格式的结果")
     print("\n  输入 'exit'、'quit' 或 '退出' 来结束对话")
     print("=" * 70)
     
@@ -76,6 +75,7 @@ def chat_with_agent(agent):
         
         responses = []
         tool_called = False
+        tool_result_json = None
         
         for response in agent.run(messages=messages):
             responses.append(response)
@@ -101,7 +101,13 @@ def chat_with_agent(agent):
                 
                 # 显示工具返回
                 if role == 'function':
-                    print_tool_result(msg.get('content', ''))
+                    tool_result = msg.get('content', '')
+                    print_tool_result(tool_result)
+                    # 尝试解析工具返回的 JSON
+                    try:
+                        tool_result_json = json.loads(tool_result)
+                    except json.JSONDecodeError:
+                        pass
                 
                 # 获取助手最终回复
                 if role == 'assistant' and 'content' in msg:
@@ -109,11 +115,13 @@ def chat_with_agent(agent):
                     if content:
                         assistant_reply = content
             
-            # 打印最终回复
-            if tool_called:
+            # 打印最终回复（优先显示解析出的 JSON）
+            if tool_called and tool_result_json:
+                print(f"\n📋 解析结果 (JSON):")
+                print(json.dumps(tool_result_json, ensure_ascii=False, indent=2))
+            elif assistant_reply:
+                # 如果 Agent 有回复，也显示出来
                 print(f"\n🤖 Agent: {assistant_reply}")
-            else:
-                print(assistant_reply)
             
             # 更新对话历史（添加助手的回复）
             if assistant_reply:
@@ -127,10 +135,10 @@ def main():
     api_key = os.getenv('DASHSCOPE_API_KEY', 'xxx')
     model_name = os.getenv('MODEL_NAME', 'qwen-plus')
     
-    print_section("Qwen-Agent 交互式工具助手")
+    print_section("DeFi Swap 意图解析 Agent")
     print(f"\n📋 配置信息:")
     print(f"   模型: {model_name}")
-    print(f"   可用工具: to_uppercase, calculate_sum, string_info, parse_swap_intent")
+    print(f"   工具: parse_swap_intent")
     
     # 初始化 LLM
     llm_cfg = {
@@ -142,30 +150,29 @@ def main():
     
     # 创建工具实例
     tools = [
-        ToUppercaseTool(),
-        CalculateSumTool(),
-        StringInfoTool(),
         ParseSwapIntentTool(),
     ]
     
     # 创建 Agent 并挂载工具
     agent = Assistant(
         llm=llm,
-        name='工具助手',
-        description='一个能够使用各种工具完成任务的智能助手',
-        system_message='''你是一个智能助手，能够使用工具来完成用户的请求。
-当用户需要：
-- 将字符串转换为大写时，使用 to_uppercase 工具
-- 计算两个数的和时，使用 calculate_sum 工具
-- 分析字符串信息时，使用 string_info 工具
-- 解析 DeFi 换币意图（提取链名、代币和金额等）时，使用 parse_swap_intent 工具
+        name='DeFi Swap 解析助手',
+        description='专门用于解析 DeFi Swap 意图的智能助手',
+        system_message='''你是一个专门用于解析 DeFi Swap 意图的助手。
 
-对于 DeFi 相关请求，你的主要职责是：
-- 先用 parse_swap_intent 工具从自然语言中提取结构化意图（链名、tokenIn、tokenOut、amount 等）
-- 然后用自然语言向用户解释你解析出的结果，不要直接帮用户发起链上交易
+当用户输入 DeFi Swap 相关的自然语言时（例如："帮我在 Base 上用 10 USDC 换成 ETH"），
+你需要：
+1. 自动调用 parse_swap_intent 工具来解析用户的意图
+2. 工具会返回一个 JSON 对象，包含 chain、tokenIn、tokenOut、amount 等字段
+3. 你只需要直接返回这个 JSON 对象，格式如下：
+   {
+     "chain": "base",
+     "tokenIn": "USDC",
+     "tokenOut": "ETH",
+     "amount": "10"
+   }
 
-请根据用户的需求自动选择合适的工具，并给出友好的回复。
-回复要简洁明了。''',
+请直接返回 JSON，不要添加额外的解释文字。如果解析失败，返回错误信息。''',
         function_list=tools,  # 挂载工具
     )
     
@@ -174,10 +181,9 @@ def main():
     
     # 结束提示
     print("\n" + "=" * 70)
-    print("学习要点总结：")
-    print("  1. Agent 能够根据用户意图自动选择并调用工具")
-    print("  2. 工具调用对用户是透明的，Agent 会自动处理")
-    print("  3. Agent 可以在对话中灵活切换使用工具或直接回答")
+    print("使用说明：")
+    print("  - 输入自然语言描述 DeFi Swap 操作")
+    print("  - Agent 会自动解析并返回 JSON 格式的结构化数据")
     print("=" * 70 + "\n")
 
 
