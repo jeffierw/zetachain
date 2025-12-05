@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+qwen-agent
+web3
+python-dotenv
+pydantic
